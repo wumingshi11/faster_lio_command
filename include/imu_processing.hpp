@@ -162,6 +162,7 @@ void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_
     last_imu_ = meas.imu_.back();
 }
 
+// todo 点云去畸变， 放在IMU中 这个文件的主要方法 
 void ImuProcess::UndistortPcl(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
                               PointCloudType &pcl_out) {
     /*** add the imu_ of the last frame-tail to the of current frame-head ***/
@@ -313,7 +314,7 @@ void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_
 
         return;
     }
-
+    // 点云去畸变
     Timer::Evaluate([&, this]() { UndistortPcl(meas, kf_state, *cur_pcl_un_); }, "Undistort Pcl");
 }
 }  // namespace faster_lio

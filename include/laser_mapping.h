@@ -20,6 +20,7 @@ class LaserMapping {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
+// 体素类型，决定了PHC使用希伯尔曲线查找最近邻点，速度更快
 #ifdef IVOX_NODE_TYPE_PHC
     using IVoxType = IVox<3, IVoxNodeType::PHC, PointType>;
 #else
@@ -39,10 +40,10 @@ class LaserMapping {
 
     /// init without ros
     bool InitWithoutROS(const std::string &config_yaml);
-
+    // 在增加激光数据后调用
     void Run();
 
-    // callbacks of lidar and imu
+    // callbacks of lidar and imu， 外部通过这3个接口传递数据
     void StandardPCLCallBack(const sensor_msgs::PointCloud2::ConstPtr &msg);
     void LivoxPCLCallBack(const livox_ros_driver::CustomMsg::ConstPtr &msg);
     void IMUCallBack(const sensor_msgs::Imu::ConstPtr &msg_in);
@@ -50,7 +51,7 @@ class LaserMapping {
     // sync lidar with imu
     bool SyncPackages();
 
-    /// interface of mtk, customized obseravtion model
+    /// interface of mtk, customized obseravtion model ekfom_data 为 H
     void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data);
 
     ////////////////////////////// debug save / show ////////////////////////////////////////////////////////////////

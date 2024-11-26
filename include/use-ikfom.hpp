@@ -2,7 +2,9 @@
 #define FASTER_LIO_USE_IKFOM_H
 
 #include "IKFoM_toolkit/esekfom/esekfom.hpp"
-
+// model
+// $ x_k  = F_k x_{k-1} + B_kU_k + w_k $
+// $ z_k = H_k x_k + v_k $
 namespace faster_lio {
 
 typedef MTK::vect<3, double> vect3;
@@ -11,9 +13,10 @@ typedef MTK::S2<double, 98090, 10000, 1> S2;
 typedef MTK::vect<1, double> vect1;
 typedef MTK::vect<2, double> vect2;
 
+// 23 维 offset_R_L_I 表示 R_il
 MTK_BUILD_MANIFOLD(state_ikfom, ((vect3, pos))((SO3, rot))((SO3, offset_R_L_I))((vect3, offset_T_L_I))((vect3, vel))(
                                     (vect3, bg))((vect3, ba))((S2, grav)));
-
+// 6 维
 MTK_BUILD_MANIFOLD(input_ikfom, ((vect3, acc))((vect3, gyro)));
 
 MTK_BUILD_MANIFOLD(process_noise_ikfom, ((vect3, ng))((vect3, na))((vect3, nbg))((vect3, nba)));
@@ -32,11 +35,13 @@ MTK::get_cov<process_noise_ikfom>::type process_noise_cov() {
 
 // double L_offset_to_I[3] = {0.04165, 0.02326, -0.0284}; // Avia
 // vect3 Lidar_offset_to_IMU(L_offset_to_I, 3);
+// 预处理状体变量，去除偏差， 和readme中含义好像不一致，本月应该是更新s
 Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in) {
     Eigen::Matrix<double, 24, 1> res = Eigen::Matrix<double, 24, 1>::Zero();
     vect3 omega;
-    in.gyro.boxminus(omega, s.bg);
+    in.gyro.boxminus(omega, s.bg); // omega = in.gyro - s.bg;
     vect3 a_inertial = s.rot * (in.acc - s.ba);
+    // 预处理后的状态变量
     for (int i = 0; i < 3; i++) {
         res(i) = s.vel[i];
         res(i + 3) = omega[i];
@@ -49,9 +54,9 @@ Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in) {
     Eigen::Matrix<double, 24, 23> cov = Eigen::Matrix<double, 24, 23>::Zero();
     cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
     vect3 acc_;
-    in.acc.boxminus(acc_, s.ba);
+    in.acc.boxminus(acc_, s.ba); // in.acc - s.ba
     vect3 omega;
-    in.gyro.boxminus(omega, s.bg);
+    in.gyro.boxminus(omega, s.bg); // omega = in.gyro - s.bg
     cov.template block<3, 3>(12, 3) = -s.rot.toRotationMatrix() * MTK::hat(acc_);
     cov.template block<3, 3>(12, 18) = -s.rot.toRotationMatrix();
     Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();

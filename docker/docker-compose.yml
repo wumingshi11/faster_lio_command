@@ -6,9 +6,9 @@ services:
   fasterlio-ubuntu20:
     image: zhuhu/fasterlio-ubuntu20:0.1
     build: .
-
-    command: lxterminal
-    runtime: nvidia
+    command: /bin/bash
+      #command: lxterminal
+      #runtime: nvidia
     privileged: true
     stdin_open: true
     tty: true
@@ -20,9 +20,16 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ../../faster-lio:/root/catkin_ws/src/faster-lio
       - ${DATASET_DIR}:/root/Dataset
+      - ~/docker/env:/root/env # 存储空间映射，映射到放代码的空间
+      - ~/docker/vscode:/root/.vscode-server
+
+
+
 
     entrypoint: /ros_entrypoint.sh
     network_mode: host
+    ports:
+      - 22002:22 
 
 volumes:
   fasterlio-ubuntu20:

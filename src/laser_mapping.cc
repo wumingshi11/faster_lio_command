@@ -36,6 +36,7 @@ bool LaserMapping::InitWithoutROS(const std::string &config_yaml) {
 
     // esekf init
     std::vector<double> epsi(23, 0.001);
+    // 初始化卡尔曼滤波
     kf_.init_dyn_share(
         get_f, df_dx, df_dw,
         [this](state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) { ObsModel(s, ekfom_data); },
@@ -272,6 +273,7 @@ void LaserMapping::Run() {
 
     /// IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
+    // bug 反了
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
         LOG(WARNING) << "No point, skip this scan!";
         return;
@@ -284,9 +286,10 @@ void LaserMapping::Run() {
         flg_first_scan_ = false;
         return;
     }
+    // 0.1s的间隔期
     flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
 
-    /// downsample
+    /// downsample 降采样
     Timer::Evaluate(
         [&, this]() {
             voxel_scan_.setInputCloud(scan_undistort_);
@@ -299,6 +302,7 @@ void LaserMapping::Run() {
         LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
         return;
     }
+    // resize为 降采样后的数据
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
     residuals_.resize(cur_pts, 0);
@@ -311,6 +315,7 @@ void LaserMapping::Run() {
             // iterated state estimation
             double solve_H_time = 0;
             // update the observation model, will call nn and point-to-plane residual computation
+            // 观测模型在kf_初始化时已经传入，此处用调用观测模型，观测模型内部实现了迭代拉尔曼滤波
             kf_.update_iterated_dyn_share_modified(options::LASER_POINT_COV, solve_H_time);
             // save the state
             state_point_ = kf_.get_x();
@@ -320,6 +325,7 @@ void LaserMapping::Run() {
         "IEKF Solve and Update");
 
     // update local map
+
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
 
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " downsamp " << cur_pts
@@ -366,6 +372,7 @@ void LaserMapping::StandardPCLCallBack(const sensor_msgs::PointCloud2::ConstPtr 
             }
 
             PointCloudType::Ptr ptr(new PointCloudType());
+            // msg转为PointCloudType
             preprocess_->Process(msg, ptr);
             lidar_buffer_.push_back(ptr);
             time_buffer_.push_back(msg->header.stamp.toSec());
@@ -403,6 +410,7 @@ void LaserMapping::LivoxPCLCallBack(const livox_ros_driver::CustomMsg::ConstPtr 
             PointCloudType::Ptr ptr(new PointCloudType());
             preprocess_->Process(msg, ptr);
             lidar_buffer_.emplace_back(ptr);
+            // 开始时间
             time_buffer_.emplace_back(last_timestamp_lidar_);
         },
         "Preprocess (Livox)");
@@ -414,6 +422,7 @@ void LaserMapping::IMUCallBack(const sensor_msgs::Imu::ConstPtr &msg_in) {
     publish_count_++;
     sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
 
+    // 纠正两个系统的时间偏差
     if (abs(timediff_lidar_wrt_imu_) > 0.1 && time_sync_en_) {
         msg->header.stamp = ros::Time().fromSec(timediff_lidar_wrt_imu_ + msg_in->header.stamp.toSec());
     }
@@ -438,6 +447,7 @@ bool LaserMapping::SyncPackages() {
 
     /*** push a lidar scan ***/
     if (!lidar_pushed_) {
+       // 时间用于运动补偿
         measures_.lidar_ = lidar_buffer_.front();
         measures_.lidar_bag_time_ = time_buffer_.front();
 
@@ -447,6 +457,7 @@ bool LaserMapping::SyncPackages() {
         } else if (measures_.lidar_->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime_) {
             lidar_end_time_ = measures_.lidar_bag_time_ + lidar_mean_scantime_;
         } else {
+        // TODO : ???
             scan_num_++;
             lidar_end_time_ = measures_.lidar_bag_time_ + measures_.lidar_->points.back().curvature / double(1000);
             lidar_mean_scantime_ +=
@@ -460,7 +471,8 @@ bool LaserMapping::SyncPackages() {
     if (last_timestamp_imu_ < lidar_end_time_) {
         return false;
     }
-
+    
+    // 将小于lidar时间的imu放置在measures中
     /*** push imu_ data, and pop from imu_ buffer ***/
     double imu_time = imu_buffer_.front()->header.stamp.toSec();
     measures_.imu_.clear();
@@ -542,6 +554,7 @@ void LaserMapping::MapIncremental() {
         "    IVox Add Points");
 }
 
+// 由观测模型调用，最核心的方法
 /**
  * Lidar point cloud registration
  * will be called by the eskf custom observation model
@@ -550,8 +563,9 @@ void LaserMapping::MapIncremental() {
  * @param ekfom_data H matrix
  */
 void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
+    // 下采样，并且去畸变后的点
     int cnt_pts = scan_down_body_->size();
-
+    // 为了并行，很高翔
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
         index[i] = i;
@@ -559,10 +573,11 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
 
     Timer::Evaluate(
         [&, this]() {
+            // ladar到世界坐标系 offset_R_L_I 表示 R_il
             auto R_wl = (s.rot * s.offset_R_L_I).cast<float>();
             auto t_wl = (s.rot * s.offset_T_L_I + s.pos).cast<float>();
 
-            /** closest surface search and residual computation **/
+            /** closest surface search and residual computation，并行化 **/
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
                 PointType &point_world = scan_down_world_->points[i];
@@ -573,21 +588,25 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                 point_world.intensity = point_body.intensity;
 
                 auto &points_near = nearest_points_[i];
+                // 判断是否需要收敛 ？？
                 if (ekfom_data.converge) {
                     /** Find the closest surfaces in the map **/
+                    // 查找最近点（与fast_LIO的不同点）
                     ivox_->GetClosestPoint(point_world, points_near, options::NUM_MATCH_POINTS);
                     point_selected_surf_[i] = points_near.size() >= options::MIN_NUM_MATCH_POINTS;
+                    // 平面估计
                     if (point_selected_surf_[i]) {
                         point_selected_surf_[i] =
                             common::esti_plane(plane_coef_[i], points_near, options::ESTI_PLANE_THRESHOLD);
                     }
                 }
-
+                // 平面估计成功
                 if (point_selected_surf_[i]) {
                     auto temp = point_world.getVector4fMap();
                     temp[3] = 1.0;
+                    // 与平面的距离，即残差
                     float pd2 = plane_coef_[i].dot(temp);
-
+                    // 残差的一个阈值，大于该值无效，81应该是一个经验值
                     bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
                     if (valid_corr) {
                         point_selected_surf_[i] = true;

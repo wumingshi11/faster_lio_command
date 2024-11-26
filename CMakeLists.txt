@@ -29,5 +29,6 @@ else ()
     message("USING_IVOX_NODE_TYPE_DEFAULT")
 endif()
 
+include_directories(include)
 add_subdirectory(src)
 add_subdirectory(app)

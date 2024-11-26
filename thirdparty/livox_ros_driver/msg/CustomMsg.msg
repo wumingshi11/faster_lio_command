@@ -1,6 +1,6 @@
 # Livox publish pointcloud msg format.
 
-Header header             # ROS standard message header
+Header header             # ROS standard message header time(s,ns) id
 uint64 timebase           # The time of first point
 uint32 point_num          # Total number of pointclouds
 uint8  lidar_id           # Lidar device id number
